@@ -3,10 +3,30 @@ from __future__ import annotations
 import argparse
 import re
 from collections.abc import Sequence
+from enum import StrEnum
 from typing import IO
 
 PASS = 0
 FAIL = 1
+COMPARER_RE = re.compile(b"={2,3}|!=|~=")
+
+
+class Comparer(StrEnum):
+    equal = "=="
+    approx_equal = "~="
+    not_equal = "!="
+
+    @classmethod
+    def is_exists(cls, key: str) -> bool:
+        try:
+            cls(key)
+            return True
+        except ValueError:
+            return False
+
+
+class ComparerError(Exception):
+    pass
 
 
 class Requirement:
@@ -56,7 +76,7 @@ class Requirement:
             self.value = value
 
 
-def fix_requirements(f: IO[bytes]) -> int:
+def fix_requirements(f: IO[bytes], comparer: Comparer | None = None) -> int:
     requirements: list[Requirement] = []
     before = list(f)
     after: list[bytes] = []
@@ -91,6 +111,12 @@ def fix_requirements(f: IO[bytes]) -> int:
         elif line.lstrip().startswith(b"#") or line.strip() == b"":
             requirement.comments.append(line)
         else:
+            if comparer is not None:
+                try:
+                    line = fix_version_comparison(line, comparer)
+                except ComparerError:
+                    return FAIL
+
             requirement.append_value(line)
 
     # if a file ends in a comment, preserve it at the end
@@ -122,16 +148,30 @@ def fix_requirements(f: IO[bytes]) -> int:
         return FAIL
 
 
+def fix_version_comparison(line: bytes, comparer: Comparer) -> bytes:
+    if b">=" in line and b"<=" in line:
+        raise ComparerError("Not supported for >= and <=.")
+
+    return COMPARER_RE.sub(comparer.encode(), line)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("filenames", nargs="*", help="Filenames to fix")
+    parser.add_argument("--comparer", help="Force Versioning Comparison Method")
+
     args = parser.parse_args(argv)
 
     retv = PASS
 
+    comparer = None
+    if args.comparer is not None:
+        assert Comparer.is_exists(args.comparer), args.comparer
+        comparer = Comparer(args.comparer)
+
     for arg in args.filenames:
         with open(arg, "rb+") as file_obj:
-            ret_for_file = fix_requirements(file_obj)
+            ret_for_file = fix_requirements(file_obj, comparer)
 
             if ret_for_file:
                 print(f"Sorting {arg}")

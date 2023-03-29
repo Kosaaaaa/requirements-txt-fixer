@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from requirements_txt_fixer import FAIL, PASS, Requirement, main
+from requirements_txt_fixer import (
+    FAIL,
+    PASS,
+    Comparer,
+    ComparerError,
+    Requirement,
+    fix_version_comparison,
+    main,
+)
 
 
 @pytest.mark.parametrize(
@@ -106,6 +114,35 @@ def test_integration(input_s, expected_retval, output, tmpdir):
 
     assert path.read_binary() == output
     assert output_retval == expected_retval
+
+
+@pytest.mark.parametrize(
+    ("input_s", "expected_retval", "comparer"),
+    (
+        (
+            b"b==1.0.0\n",
+            b"b~=1.0.0\n",
+            Comparer.approx_equal,
+        ),
+        (
+            b"b==1.0.0\n",
+            b"b==1.0.0\n",
+            Comparer.equal,
+        ),
+        (
+            b"b==1.0.0\n",
+            b"b!=1.0.0\n",
+            Comparer.not_equal,
+        ),
+    ),
+)
+def test_fix_version_comparison(input_s, expected_retval, comparer):
+    assert fix_version_comparison(input_s, comparer) == expected_retval
+
+
+def test_fix_verion_comparison_raise_exception():
+    with pytest.raises(ComparerError):
+        fix_version_comparison(b"b>=1.0.0,b<=2.0.0", Comparer.equal)
 
 
 def test_requirement_object():
